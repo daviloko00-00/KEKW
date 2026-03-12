@@ -1,0 +1,31 @@
+O que o código faz, passo a passo:
+
+Importações – apenas bibliotecas padrão Python + ctypes para Windows.
+
+Configurações globais – IPs, portas, caminhos, XOR_KEY, tudo no início para ajuste fácil.
+
+XOR simples – "criptografa" o que é digitado; não é seguro, mas dificita leitura direta.
+
+Log – grava tudo em %APPDATA%\svchost.log, mesclado com data/hora.
+
+Keylogger – hook de baixo nível do Windows que intercepta cada tecla pressionada, converte para caractere legível, aplica XOR e guarda num buffer global protegido por Lock.
+
+Persistência – copia o Python (ou py>exe) para msupdate.exe dentro de %APPDATA% e registra ele em HKCU\Run\msupdate.
+
+Persist_Guardian – thread que a cada 60 s verifica se a chave de registro foi apagada; se sim, recria.
+
+Overwrite_then_unlink – abre arquivo, preenche de zeros, depois apaga (evita recuperação básica).
+
+Cleanup_hardcore – apaga msupdate.exe, apaga svchost.log, remove a chave do registro, limpa logs do Event Viewer e tenta apagar shadows.
+
+Suicide – aguarda 3 s, sobrescreve/apaga o próprio .py, depois mata o processo com SIGTERM.
+
+Menu/show_menu – texto simples enviado pelo socket; é o "prompt" do atacante.
+
+handle_command – interpreta opções 1-5; opção 4 ou "/die" ativa WIPE_FLAG e dispara suicide.
+
+connect_back – tenta conectar; se falhar, espera RETRY_CUR segundos, depois dobra até 30 min.
+
+main_loop – conecta, mostra menu, processa comandos, trata desconexões; se WIPE_FLAG=True, chama suicide(0) e quebra o loop.
+
+Entrada (main) – cria mutex singleton, instala persistência e threads de guardian/keylogger, depois entra no main_loop eterno.
